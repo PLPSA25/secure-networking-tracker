@@ -16,7 +16,33 @@ anything in the browser.
 Screenshots below were captured on the deployed application at the live URL
 above, not on a local development server.
 
-TODO: screenshots or a short recording of the product in use.
+**Sign in.** The application's own sign-in form, served from the public Vercel
+URL with no Vercel login wall in front of it.
+
+![Sign-in form](docs/evidence/sign-in.png)
+
+**Signed in.** The contact list, with sort and filter controls and the signed-in
+account shown in the header.
+
+![Signed in with contact list](docs/evidence/signed-in.png)
+
+**Create.** A new contact appears in the list immediately — the insert returns
+the created row via `.select().single()`, so no refetch is needed.
+
+![Contact created](docs/evidence/contact-create.png)
+
+**Edit.** The same contact, updated in place.
+
+![Contact edited](docs/evidence/contact-edit.png)
+
+**Survives a refresh.** After a full browser reload, the edit persists — the data
+lives in Neon Postgres, not in browser state.
+
+![Contact after refresh](docs/evidence/contact-refresh.png)
+
+**Delete.** The contact is removed and the list returns to three.
+
+![Contact deleted](docs/evidence/contact-delete.png)
 
 ## Features
 
@@ -289,9 +315,56 @@ rather than left to overstate or understate what running `npm test` requires.
 
 ## Security evidence
 
-- **Two-account privacy test:** TODO
-- **Invalid input failing safely:** TODO
-- **No secrets in git:** TODO
+### Two-account privacy test
+
+Two different signed-in accounts, side by side in the same screenshot: User A on
+the left, User B on the right, each showing their own contacts and none of the
+other's.
+
+![Two accounts, isolated data](docs/evidence/two-account.png)
+
+**There is no error message in this screenshot, and that is the point.** Row
+Level Security filters unauthorized rows inside Postgres, before the Data API
+ever builds a response. User B's query for `contacts` is a perfectly valid,
+successful request that simply returns none of User A's rows — the rows are
+invisible, not forbidden. A permission error would mean the rows had been
+reached and then refused; an empty result means they were never in scope.
+
+### Invalid input fails safely
+
+A whitespace-only name. The browser's `required` attribute does not block it —
+`"   "` is not an empty field — so the request reaches Postgres, where
+`CHECK (length(btrim(name)) > 0)` rejects it. The raw constraint violation is
+translated into plain language before it reaches the user.
+
+![Invalid input rejected](docs/evidence/invalid-input.png)
+
+### Four separate Row Level Security policies
+
+The rubric requires separate `SELECT`, `INSERT`, `UPDATE` and `DELETE` policies
+rather than a single `FOR ALL`. Queried live against the production branch:
+
+![Four RLS policies](docs/evidence/rls-policies.png)
+
+### Automated tests
+
+`npm test` — unit tests for the error translator plus two integration tests that
+sign in as a dedicated test-only account and confirm the database rejects a
+blank name and an invalid priority.
+
+![Test output, all passing](docs/evidence/test-output.png)
+
+### No secrets committed
+
+`.env.local` and `.env.test.local` are gitignored; only `.env.example`, which
+holds placeholder values, is tracked. Verify with:
+
+```bash
+git ls-files | grep -i env
+```
+
+The only result is `.env.example`. `DATABASE_URL` is never read by the
+application and holds no value in any committed file.
 
 ## Deployment
 
