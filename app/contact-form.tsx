@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Contact } from "@/lib/contacts";
+import { GENERIC_ERROR } from "@/lib/contact-errors";
 
 type Priority = Contact["priority"];
 
@@ -56,9 +57,14 @@ export function ContactForm({
     e.preventDefault();
     setError(null);
     setPending(true);
-    const { error } = await onSubmit(values);
-    setPending(false);
-    if (error) setError(error.message);
+    try {
+      const { error } = await onSubmit(values);
+      if (error) setError(error.message);
+    } catch {
+      setError(GENERIC_ERROR);
+    } finally {
+      setPending(false);
+    }
   }
 
   return (

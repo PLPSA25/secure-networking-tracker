@@ -9,7 +9,7 @@ import {
   listContacts,
   updateContact,
 } from "@/lib/contacts";
-import { translateContactError } from "@/lib/contact-errors";
+import { GENERIC_ERROR, translateContactError } from "@/lib/contact-errors";
 import { ContactForm, type ContactFormValues } from "./contact-form";
 
 type SortBy = "name" | "priority" | "created_at";
@@ -74,10 +74,15 @@ export function Contacts() {
   const [filterPriority, setFilterPriority] = useState<PriorityFilter>("all");
 
   useEffect(() => {
-    listContacts().then(({ data, error }) => {
-      if (error) setLoadError(translateContactError(error));
-      else setContacts(data);
-    });
+    (async () => {
+      try {
+        const { data, error } = await listContacts();
+        if (error) setLoadError(translateContactError(error));
+        else setContacts(data);
+      } catch (err) {
+        setLoadError(translateContactError(err));
+      }
+    })();
   }, []);
 
   const visibleContacts = useMemo(() => {
@@ -90,31 +95,45 @@ export function Contacts() {
   }, [contacts, sortBy, filterPriority]);
 
   async function handleCreate(values: ContactFormValues) {
+    setActionError(null);
     const { data, error } = await createContact(toInput(values));
-    if (!error && data) {
-      setContacts((c) => [...(c ?? []), data]);
-      setAdding(false);
+    if (error) {
+      return { error: { message: translateContactError(error) } };
     }
-    return { error: error ? { message: translateContactError(error) } : null };
+    if (!data) {
+      return { error: { message: GENERIC_ERROR } };
+    }
+    setContacts((c) => [...(c ?? []), data]);
+    setAdding(false);
+    return { error: null };
   }
 
   async function handleUpdate(id: number, values: ContactFormValues) {
+    setActionError(null);
     const { data, error } = await updateContact(id, toInput(values));
-    if (!error && data) {
-      setContacts((c) => (c ?? []).map((row) => (row.id === id ? data : row)));
-      setEditingId(null);
+    if (error) {
+      return { error: { message: translateContactError(error) } };
     }
-    return { error: error ? { message: translateContactError(error) } : null };
+    if (!data) {
+      return { error: { message: GENERIC_ERROR } };
+    }
+    setContacts((c) => (c ?? []).map((row) => (row.id === id ? data : row)));
+    setEditingId(null);
+    return { error: null };
   }
 
   async function handleDelete(id: number) {
     setActionError(null);
-    const { error } = await deleteContact(id);
-    if (error) {
-      setActionError(translateContactError(error));
-      return;
+    try {
+      const { error } = await deleteContact(id);
+      if (error) {
+        setActionError(translateContactError(error));
+        return;
+      }
+      setContacts((c) => (c ?? []).filter((row) => row.id !== id));
+    } catch (err) {
+      setActionError(translateContactError(err));
     }
-    setContacts((c) => (c ?? []).filter((row) => row.id !== id));
   }
 
   if (loadError) {

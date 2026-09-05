@@ -2,6 +2,7 @@ import { neon, type Database } from "./neon";
 
 export type Contact = Database["public"]["Tables"]["contacts"]["Row"];
 export type ContactInput = Database["public"]["Tables"]["contacts"]["Insert"];
+export type ContactUpdate = Database["public"]["Tables"]["contacts"]["Update"];
 
 export function listContacts() {
   return neon.from("contacts").select("*");
@@ -13,7 +14,7 @@ export function createContact(input: ContactInput) {
   return neon.from("contacts").insert(input).select().single();
 }
 
-export function updateContact(id: number, input: ContactInput) {
+export function updateContact(id: number, input: ContactUpdate) {
   return neon
     .from("contacts")
     .update({ ...input, updated_at: new Date().toISOString() })

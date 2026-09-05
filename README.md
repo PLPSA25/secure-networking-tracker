@@ -202,5 +202,55 @@ add the Vercel domain to Neon Auth trusted origins.
 
 ## Known limitations and what I would improve next
 
-- Neon's auth packages are beta releases (@neondatabase/auth 0.5.0-beta).
-- TODO: add more, honestly and specifically.
+- **Auth errors are shown verbatim, which allows account enumeration.**
+  Sign-up/sign-in show Neon Auth's own error text as-is (e.g. "Email address
+  already registered" vs. "Invalid email or password"), so an attacker can
+  learn whether an email has an account by attempting to sign up with it. The
+  standard mitigation is a neutral response ("If that email isn't already
+  registered, check your inbox") paired with mandatory email verification —
+  but email verification is currently disabled on this Neon Auth project, so
+  a neutral message today would just leave a legitimate user with a wrong
+  password stuck with no explanation. I'm treating this as a considered
+  trade-off for now, not an oversight: fix it together with verification, not
+  separately.
+- **A Data API error's `.details` field can carry Postgres detail or a raw
+  stack trace.** Nothing in this app reads that field today — every error
+  path goes through `translateContactError`'s allowlist, which only ever
+  looks at `.message` — but a future debug `console.error(error)` would leak
+  it straight to the browser console. Worth a lint rule or a wrapper that
+  strips `.details` before an error object is ever allowed to reach a
+  `console.*` call.
+- **`user_id` is kept out of insert/update payloads by TypeScript types, not
+  by a runtime check.** `ContactInput`/`ContactUpdate` simply have no
+  `user_id` field, so nothing today can send one — but that's a type-checker
+  guarantee, not a runtime one. The real protection is the database's own
+  `WITH CHECK (auth.user_id() = user_id)` on both the insert and update
+  policies, which would reject a spoofed value regardless of what the client
+  sends. A future refactor could still introduce a code path that spreads
+  unvalidated data into an insert without the type checker catching it; a
+  runtime strip (e.g. `delete payload.user_id` before every call) would close
+  that gap independent of the type layer.
+- **Switching which contact is being edited discards another contact's
+  unsaved edit with no warning.** Only one contact can be in edit mode at a
+  time; opening a second one silently unmounts the first form, reverting to
+  its saved values. A confirmation prompt (or just disabling other rows' Edit
+  buttons while one is open) would fix this; skipped for now since it's a
+  narrow, low-consequence case.
+- **Client-side sorting and filtering don't scale.** `app/contacts.tsx` fetches
+  the full contact list and sorts/filters it in the browser. Fine for a
+  personal contact list of a few hundred rows; would need to move to
+  `.order()`/`.eq()` on the Data API query itself (and a priority-ranking
+  approach that doesn't rely on alphabetical order) if this were ever meant to
+  hold thousands of contacts.
+- **Every Data API call costs an extra `/get-session` round trip.** The SDK
+  resolves a fresh JWT on every single request rather than caching one for
+  its lifetime (verified directly in `@neondatabase/auth`'s source — see
+  "Authentication and row ownership" above). Fine at this app's scale; would
+  be worth caching the token client-side until it's near expiry if request
+  volume ever became a concern.
+- Neon's auth packages are beta releases (@neondatabase/auth 0.5.0-beta,
+  @neondatabase/neon-js 0.7.0-beta). Several behaviors in this project were
+  found to diverge from the SDK's own documented examples — most notably,
+  `signIn.email`/`signUp.email` throw on failure instead of returning
+  `{ data, error }` as documented — and were only caught by testing directly
+  against the live endpoints rather than trusting the docs.
