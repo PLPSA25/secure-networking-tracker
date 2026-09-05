@@ -1,59 +1,132 @@
 # Secure Networking Tracker
 
-> **DRAFT — every TODO must be filled before submission.**
-> The README is the grading surface: a grader should need only this repo URL to
-> understand, run, test, and evaluate the project.
-
-TODO: one-paragraph overview — what the app does and who it is for.
+Secure Networking Tracker is a private contact list for people you meet while
+networking — name, company, role, where you met them, notes, and a priority
+so you know who to follow up with first. It's built for a single signed-in
+user managing their own list: every account's contacts are visible and
+editable only to that account, enforced by the database itself rather than by
+anything in the browser.
 
 ## Live application
 
-**URL:** TODO
+**URL:** https://secure-networking-tracker-mu.vercel.app
 
 ## Screenshots and walkthrough
+
+Screenshots below were captured on the deployed application at the live URL
+above, not on a local development server.
 
 TODO: screenshots or a short recording of the product in use.
 
 ## Features
 
-- TODO: sign up, sign in, sign out
-- TODO: add a contact with name, company, role, where met, notes, priority
-- TODO: view contacts in a sortable list
-- TODO: edit and delete your own contacts
-- TODO: sort and filter
-- TODO: responsive on mobile and desktop
+- Sign up, sign in, and sign out with email and password (Neon Managed Better
+  Auth); the session persists across a browser refresh.
+- Add a contact with name, company, role, where you met, notes, and a
+  high/medium/low priority.
+- View, edit, and delete only the contacts you created — every other
+  signed-in user's contacts are invisible and unreachable, enforced by
+  Postgres Row Level Security, not by the UI.
+- Sort by name (A–Z), priority (high → low, not alphabetical), or date added
+  (newest first).
+- Filter the list by priority.
+- Four distinct, reachable UI states: loading, empty ("no contacts yet" vs.
+  "no contacts match this filter"), success, and error.
+- Responsive layout — usable at phone width and laptop width.
+- Invalid input (a blank/whitespace-only name, an invalid priority value) is
+  rejected at the database and reported in plain language, not just checked
+  in the browser.
 
 ## Technology stack and why
 
+The entire stack was specified by the assignment. What follows is what each
+piece actually does in this application, and where the mandated choice
+happened to fit the problem well.
+
 | Layer | Choice | Why |
 |---|---|---|
-| Framework | Next.js 16 (App Router) | TODO |
-| Database | Neon Postgres | TODO |
-| Authentication | Neon Managed Better Auth | TODO |
-| Data access | Neon Data API via @neondatabase/neon-js | TODO |
-| Styling | Tailwind CSS | TODO |
-| Hosting | Vercel | TODO |
-| Source control | Git + GitHub | TODO |
+| Framework | Next.js 16 (App Router) | In practice, the whole app is client components with no custom server route of its own, so App Router mainly supplied the project scaffold and dev server, not anything the app's logic depends on. |
+| Database | Neon Postgres | It's also the reason this project's security model works at all: Postgres's Row Level Security is the actual trust boundary the app relies on, not just a "the assignment said so" checkbox. |
+| Authentication | Neon Managed Better Auth | It's what issues the signed JWTs that both the Data API and Postgres's `auth.user_id()` trust — that's the specific mechanism that makes per-row ownership possible with no server tier. |
+| Data access | Neon Data API via @neondatabase/neon-js | This is the piece that makes "no backend of our own" concrete: it lets the browser query Postgres directly over REST, with the JWT as the only credential, instead of the app writing any server-side query code. |
+| Styling | Tailwind CSS | Utility classes kept things like the four UI states and the responsive row layout in `app/contacts.tsx` to small, local class changes instead of separate stylesheet edits. |
+| Hosting | Vercel | It's also a plain fit here: `next build`/`next start` with zero custom server code to configure or deploy. |
+| Source control | Git + GitHub | The public GitHub repo is itself the graded deliverable. |
 
 ## Architecture
 
-TODO: explain frontend, backend, database, authentication, and hosting, and trace
-a request from a click to a row in Postgres and back.
+```mermaid
+flowchart LR
+    B["Browser<br/>Next.js App Router<br/>client components"]
+    A["Neon Managed<br/>Better Auth"]
+    D["Neon Data API<br/>PostgREST"]
+    P["Neon Postgres<br/>RLS + CHECK constraints"]
 
-**On frontend/backend separation.** The browser calls the Neon Data API directly.
-The backend tier is Postgres itself: Row Level Security policies and CHECK
-constraints are the trust boundary, and no client-side code can bypass them.
-TODO: expand this — it is the answer to "frontend and backend separated."
+    B -- "1. email + password" --> A
+    A -- "2. session cookie" --> B
+    B -- "3. request signed JWT" --> A
+    A -- "4. JWT with sub claim" --> B
+    B -- "5. REST call, Bearer JWT" --> D
+    D -- "6. SQL as authenticated role" --> P
+    P -- "7. only rows passing RLS" --> D
+```
+
+**Frontend.** A Next.js 16 App Router application, styled with Tailwind CSS,
+deployed on Vercel. Every component that touches data is a client component.
+Vercel serves the application; it runs no application logic of ours and holds no
+credentials beyond the two public `NEXT_PUBLIC_` endpoint URLs.
+
+**Backend.** There is no Node server in this application, and that is deliberate.
+The backend tier is **Neon Postgres itself**, reached through the Neon Data API —
+a PostgREST interface that translates HTTP requests into SQL executed as the
+`authenticated` role. Authorization and validation are enforced there, in
+database code, not in JavaScript.
+
+**Authentication.** Neon Managed Better Auth verifies credentials and issues a
+session. Before each data request, the client exchanges that session for a
+short-lived signed JWT, sent as `Authorization: Bearer`. The Data API verifies
+the signature before Postgres sees the request, so the browser can neither forge
+nor alter it.
+
+**Why this satisfies "frontend and backend separated."**
+
+The separation is not architectural decoration — it is enforced by a boundary the
+client cannot cross:
+
+- **Identity is assigned, never asserted.** `contacts.user_id` is
+  `text NOT NULL DEFAULT (auth.user_id())`. The client never sends a `user_id`;
+  Postgres stamps it from the JWT's `sub` claim at insert time.
+- **Authorization is server-side.** Four RLS policies — separate `SELECT`,
+  `INSERT`, `UPDATE` and `DELETE` — each compare `auth.user_id()` to the row's
+  `user_id`. The `UPDATE` policy carries both `USING` and `WITH CHECK`, so a user
+  can neither modify a row they do not own nor use an update to reassign
+  ownership.
+- **Validation is server-side.** `CHECK (length(btrim(name)) > 0)` and
+  `CHECK (priority IN ('high','medium','low'))` run inside Postgres. The form's
+  HTML `required` attribute is a convenience, not the guarantee.
+
+The test is what happens when the frontend is removed entirely. An attacker with
+`curl`, the public Data API URL and a valid JWT is subject to exactly the same
+rules as the UI: they see only their own rows, cannot write a row owned by anyone
+else, and cannot insert an empty name or an invalid priority. Nothing that
+protects this data lives in the browser bundle.
+
+That is the sense in which the backend is separate: not a different process, but
+a different trust domain — one the frontend has no privileged access to.
 
 ## Local setup
 
 ```bash
-git clone TODO
-cd webapp
+git clone https://github.com/PLPSA25/secure-networking-tracker.git
+cd secure-networking-tracker
 npm install
 cp .env.example .env.local   # then fill in your own values
 npm run dev
 ```
+
+`.env.local` is all `npm run dev` needs. A second file, `.env.test.local`, is
+only needed to run the integration half of the test suite (`npm test`) — see
+Environment variables and Tests below for what goes in it.
 
 ## Environment variables
 
@@ -63,15 +136,40 @@ Names only. Never commit real values.
 |---|---|---|
 | NEXT_PUBLIC_NEON_AUTH_URL | public | Neon Auth endpoint used by the browser client |
 | NEXT_PUBLIC_NEON_DATA_API_URL | public | Neon Data API endpoint used by the browser client |
-| DATABASE_URL | server only | Direct Postgres connection, for schema work only |
+| DATABASE_URL | documented, not used | Listed in `.env.example` as a name only, per the assignment's requirement — never read by this app |
+| TEST_USER_EMAIL | test only, in `.env.test.local` | Email for a dedicated, throwaway test-only account, read only by the integration test in `npm test` |
+| TEST_USER_PASSWORD | test only, in `.env.test.local` | Password for that same test-only account |
 
-This implementation does not use DATABASE_URL, NEON_AUTH_BASE_URL, or
-NEON_AUTH_COOKIE_SECRET. TODO: state why — the app opens no direct Postgres
-connection, and schema changes are applied in the Neon console SQL Editor.
+This implementation does not use `DATABASE_URL`, `NEON_AUTH_BASE_URL`, or
+`NEON_AUTH_COOKIE_SECRET`, because there is no server tier: the browser talks
+directly to Neon Auth and the Neon Data API, so nothing in this app ever opens
+a direct Postgres connection or holds a server-side auth session to secure.
+Schema changes are applied by hand in the Neon console SQL Editor — see
+`db/schema.sql` — rather than through a migration tool that would need
+`DATABASE_URL` to run.
 
 ## Database schema
 
-See `db/schema.sql`. TODO: describe every column, type, and constraint.
+The full SQL is in `db/schema.sql`, applied by hand in the Neon console. One
+table, `contacts`:
+
+| Column | Type | Constraint | What it enforces |
+|---|---|---|---|
+| `id` | `bigint` | `GENERATED BY DEFAULT AS IDENTITY`, `PRIMARY KEY` | Unique row id, assigned by Postgres on insert — the app never sends one. |
+| `user_id` | `text` | `NOT NULL`, `DEFAULT (auth.user_id())` | Owner of the row, filled in from the caller's JWT at the moment of insert — the app never sends this either. See "Authentication and row ownership" below for how this, plus the four RLS policies, is what actually keeps one user's contacts away from another's. |
+| `name` | `text` | `NOT NULL`, `CHECK (length(btrim(name)) > 0)` | Rejects a blank or whitespace-only name — `btrim` strips leading/trailing whitespace before the length check, so `"   "` fails even though it isn't literally an empty string. |
+| `company` | `text` | none | Optional; stored as `NULL` when left blank. |
+| `role` | `text` | none | Optional; stored as `NULL` when left blank. |
+| `where_met` | `text` | none | Optional; stored as `NULL` when left blank. |
+| `notes` | `text` | none | Optional; stored as `NULL` when left blank. |
+| `priority` | `text` | `NOT NULL`, `CHECK (priority IN ('high', 'medium', 'low'))` | Rejects any value other than exactly these three strings — the app's own `<select>` only offers these three, but this is the constraint that actually matters; the `<select>` is UX, not enforcement. |
+| `created_at` | `timestamptz` | `NOT NULL`, `DEFAULT now()` | Set once, at insert, by Postgres. |
+| `updated_at` | `timestamptz` | `NOT NULL`, `DEFAULT now()` | Only defaults at insert — there is no trigger that updates it automatically. `updateContact` in `lib/contacts.ts` sets it explicitly on every edit, since nothing else would. |
+
+`ROW LEVEL SECURITY` is enabled on `contacts`, with four separate policies
+(select, insert, update, delete) — see "Authentication and row ownership"
+below for what each one does and why the update policy needs both `USING` and
+`WITH CHECK`.
 
 ## Authentication and row ownership
 
@@ -197,8 +295,36 @@ rather than left to overstate or understate what running `npm test` requires.
 
 ## Deployment
 
-TODO: push to GitHub, import into Vercel, set production environment variables,
-add the Vercel domain to Neon Auth trusted origins.
+Hosted on Vercel, connected to this repository. Any push to `main` triggers a
+production deployment automatically; there is no build step to run by hand.
+
+To deploy a fresh copy:
+
+1. **Import the repository into Vercel.** The Next.js preset is detected
+   automatically and needs no changes.
+2. **Set the two public environment variables** in the Vercel project, for the
+   Production environment: `NEXT_PUBLIC_NEON_AUTH_URL` and
+   `NEXT_PUBLIC_NEON_DATA_API_URL`. Vercel will offer to pre-fill every key it
+   finds in `.env.example` — remove `DATABASE_URL`, `TEST_USER_EMAIL` and
+   `TEST_USER_PASSWORD`, which this application does not use and which have no
+   place on a public deployment. Verify the two remaining values are the real
+   endpoints and not the angle-bracket placeholders from `.env.example`.
+3. **Add the deployed domain to Neon Auth's trusted domains**
+   (Neon console → Auth → Configuration → Domains), with scheme and no trailing
+   slash: `https://secure-networking-tracker-mu.vercel.app`. This governs where
+   Neon Auth will redirect after authentication.
+4. **Confirm Vercel Deployment Protection is off** for Production. If Vercel
+   Authentication is enabled, visitors hit a Vercel login wall instead of the
+   application — and the deployment looks fine to the project owner, who is
+   already signed in.
+5. **Apply the schema.** The `contacts` table, its constraints and its four RLS
+   policies are not created by the application. Run `db/schema.sql` in the Neon
+   console SQL Editor against the target branch, then confirm with
+   `SELECT policyname, cmd FROM pg_policies WHERE tablename = 'contacts';` —
+   four rows, one per command.
+6. **Verify in a private browser window.** Signed out of Vercel and holding no
+   cookies, a visitor should reach the application's own sign-in form and be
+   able to create an account. This is the check that catches step 4.
 
 ## Known limitations and what I would improve next
 
