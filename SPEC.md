@@ -70,6 +70,11 @@ Acceptance: sign-in works on the public URL in a private browser window.
 
 ## Stage 8 — Evidence and README
 
+- Run /ultrareview over the whole repo before the final push. This project is
+  graded primarily on security, so the review should focus on auth handling,
+  RLS assumptions in client code, error handling, and any place a secret could
+  leak. Fix what it finds, then capture evidence.
+
 Capture on the deployed app, not localhost:
 1. Automated test output, at least one passing validation test
 2. Sign-in and sign-out
