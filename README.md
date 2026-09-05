@@ -142,7 +142,52 @@ database, not in JavaScript.
 npm test
 ```
 
-TODO: what the automated test verifies, plus the passing output.
+There are two kinds of test, and they run together under one `npm test`:
+
+- **Unit tests** (`tests/contact-errors.test.mjs`) for `translateContactError` —
+  no network, no auth, always run.
+- **An integration test** (`tests/contacts.integration.test.mjs`) that signs in
+  as a real (test-only) account and attempts two inserts directly against the
+  Data API: a whitespace-only name, and an invalid `priority` value. It asserts
+  the database itself rejects both — a non-null error identifying
+  `contacts_name_check` or `contacts_priority_check` — and cleans up if a row
+  is ever returned unexpectedly, so a regression can't leave data behind.
+
+**What the integration test proves, and what it doesn't.** It proves the two
+CHECK constraints reject bad input at the database, which is the point of
+Stage 6: the enforcement is real, not just client-side string matching. It
+does **not** test Row Level Security isolation between users — that's verified
+manually with two accounts (see Security evidence below), because it requires
+two separate signed-in identities and is easier to demonstrate directly than
+to script safely against real accounts.
+
+**Credentials, and what happens without them.** The integration test needs a
+signed-in session — every RLS policy on `contacts` is scoped `TO authenticated`,
+so an unauthenticated request can't reach the CHECK constraints at all, only a
+row-level-security rejection. Its credentials go in `.env.test.local`
+(gitignored, not `.env.local`) as `TEST_USER_EMAIL` and `TEST_USER_PASSWORD` —
+see `.env.example` for the names. That account is a dedicated, throwaway
+test-only user, never used for the demo data captured as grading evidence. If
+those variables aren't set, the two integration tests are reported as
+**skipped**, with the reason printed, and `npm test` still exits successfully —
+it only ever fails if credentials are present but wrong, or a constraint stops
+enforcing what it should.
+
+**Why the test needs its own Origin header and cookie handling.** Neon Auth
+enforces origin checking, and a browser sends an `Origin` header (and carries
+session cookies between requests) automatically; Node's `fetch` does neither.
+`tests/contacts.integration.test.mjs` patches `globalThis.fetch`, scoped to
+that one test file only, to add `Origin: http://localhost:3000` and replay the
+session cookie from sign-in on later requests — `lib/neon.ts` is untouched,
+since the real app runs in a browser and needs none of this. For the
+integration test to sign in at all, `http://localhost:3000` must be listed
+among the trusted origins in the Neon Auth project settings.
+
+**Node version.** The app itself runs on Node 20.9+ (Next.js 16's own
+requirement). The test suite needs Node 22.6+, because it runs `.ts` source
+files directly and relies on Node's native TypeScript stripping, which doesn't
+exist before 22.6. That's a real, narrower floor than the app's — stated here
+rather than left to overstate or understate what running `npm test` requires.
 
 ## Security evidence
 
