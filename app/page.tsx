@@ -3,6 +3,7 @@
 import { neon } from "@/lib/neon";
 import { useSession } from "@/lib/use-session";
 import { AuthForm } from "./auth-form";
+import { Contacts } from "./contacts";
 
 export default function Home() {
   const { data: session, isPending } = useSession();
@@ -34,9 +35,7 @@ export default function Home() {
       >
         Sign out
       </button>
-      <p className="text-zinc-500 dark:text-zinc-400">
-        Contacts go here (Stage 4).
-      </p>
+      <Contacts />
     </div>
   );
 }
